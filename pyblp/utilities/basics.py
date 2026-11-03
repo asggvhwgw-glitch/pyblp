@@ -45,6 +45,20 @@ Bounds = Tuple[Array, Array]
 pool: Any = None
 
 
+def _snapshot_worker_options() -> Dict[str, Any]:
+    """Snapshot user-adjustable PyBLP options before creating worker processes."""
+    import copy
+    return copy.deepcopy({
+        name: value for name, value in vars(options).items() if not name.startswith('_')
+    })
+
+
+def _initialize_worker_options(worker_options: Dict[str, Any]) -> None:
+    """Apply the parent options snapshot in each multiprocessing worker."""
+    for name, value in worker_options.items():
+        setattr(options, name, value)
+
+
 @contextlib.contextmanager
 def parallel(processes: int, use_pathos: bool = False) -> Iterator[None]:
     r"""Context manager used for parallel processing in a ``with`` statement context.
@@ -58,6 +72,10 @@ def parallel(processes: int, use_pathos: bool = False) -> Iterator[None]:
     serializing and passing data between processes. For example, if computation for a single market is very fast and
     there is a lot of data in each market that must be serialized and passed between processes, using multiprocessing
     may reduce overall speed.
+
+    Global options are copied to workers at pool creation. Changes made in the parent
+    during the pool lifetime are not propagated automatically. Under spawn/forkserver
+    with the standard multiprocessing backend, option values must be picklable.
 
     Arguments
     ---------
@@ -99,6 +117,17 @@ def parallel(processes: int, use_pathos: bool = False) -> Iterator[None]:
         yield
         return
 
+    # Configure workers explicitly; spawned interpreters otherwise use module defaults.
+    worker_options = _snapshot_worker_options()
+    if not use_pathos and multiprocessing.get_start_method() != 'fork':
+        try:
+            pickle.dumps(worker_options)
+        except Exception as exception:
+            raise TypeError(
+                "PyBLP options must be picklable under spawn/forkserver. "
+                "Use a top-level verbose_output callable, or set use_pathos=True."
+            ) from exception
+
     # register hooks for pickling and unpickling SymPy's global parameters object
     from sympy.core.parameters import _global_parameters
     unpickle_global_parameters = lambda x: _global_parameters(**x)
@@ -136,7 +165,9 @@ def parallel(processes: int, use_pathos: bool = False) -> Iterator[None]:
             pickler.save_reduce(pickle.loads, (pickle.dumps(x),), obj=x)
 
         try:
-            with pathos.multiprocessing.Pool(processes) as pool:
+            with pathos.multiprocessing.Pool(
+                processes, initializer=_initialize_worker_options, initargs=(worker_options,)
+            ) as pool:
                 output(f"Started the process pool after {format_seconds(time.time() - start_time)}.")
                 yield
                 output(f"Terminating the pool of {processes} processes ...")
@@ -146,7 +177,9 @@ def parallel(processes: int, use_pathos: bool = False) -> Iterator[None]:
             dill.settings['recurse'] = default_dill_recurse
     else:
         try:
-            with multiprocessing.pool.Pool(processes) as pool:
+            with multiprocessing.pool.Pool(
+                processes, initializer=_initialize_worker_options, initargs=(worker_options,)
+            ) as pool:
                 output(f"Started the process pool after {format_seconds(time.time() - start_time)}.")
                 yield
                 output(f"Terminating the pool of {processes} processes ...")
