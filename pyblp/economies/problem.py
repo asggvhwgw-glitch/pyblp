@@ -422,6 +422,13 @@ class ProblemEconomy(Economy):
                   Specifically, :math:`\max_j \mu_{ijt}` is subtracted from :math:`\mu_{ijt}`. This helps with stability
                   but is less helpful than subtracting from the full :math:`V_{ijt}`, so this version is less stable
                   than ``'safe_linear'``.
+                - ``'outside'`` - Opt-in outside-share-corrected contraction on mean utilities. This subtracts
+                  the observed-versus-model outside-option log-share discrepancy in addition to each inside product
+                  discrepancy. It is based on Fukasawa (2024) and uses positive matrix-scaling structure; it is
+                  supported only without nesting, with ``epsilon_scale=1``, and nonnegative integration weights.
+                  It computes outside probabilities directly in the log domain, rather than subtracting inside
+                  shares from one. The ``shares_bounds`` settings do not apply to this option.
+
 
             This option is only relevant if ``sigma`` or ``pi`` are specified because :math:`\delta` can be estimated
             analytically in the logit model with :eq:`logit_delta` and in the nested logit model with
