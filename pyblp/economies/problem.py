@@ -1014,6 +1014,7 @@ class ProblemEconomy(Economy):
         detect_micro_collinearity: bool,
         compute_simulation_covariances: bool,
         agents_override: Optional[RecArray] = None,
+        fixed_linear_parameters: Optional[Array] = None,
     ) -> 'Progress':
         """Compute demand- and supply-side contributions before recovering the linear parameters and structural error
         terms. Then, form the GMM objective value and its gradient. Finally, handle any errors that were encountered
@@ -1475,6 +1476,7 @@ class ProblemEconomy(Economy):
             y_list,
             jacobian_list,
             convert_jacobians,
+            fixed_parameters=fixed_linear_parameters,
         )
         beta[parameters.eliminated_beta_index] = stacked_parameters.flat[:iv_X1.shape[1]]
         if self.K3 > 0:
@@ -1630,7 +1632,7 @@ class ProblemEconomy(Economy):
                     fp_type,
                     shares_bounds,
                     costs_bounds,
-                    finite_differences,
+                    False,  # derivatives are not needed for fixed-parameter resamples
                     demand_moment_types,
                     supply_moment_types,
                     covariance_moments_mean,
@@ -1643,6 +1645,7 @@ class ProblemEconomy(Economy):
                     detect_micro_collinearity=False,
                     compute_simulation_covariances=False,
                     agents_override=resampled_agents,
+                    fixed_linear_parameters=stacked_parameters,
                 )
                 mean_g_samples.append(resampled_progress.mean_g.flatten())
 
@@ -1652,7 +1655,10 @@ class ProblemEconomy(Economy):
                     "error to moment covariances."
                 )
 
-            simulation_covariances = np.cov(mean_g_samples, rowvar=False)
+            # S is normalized for sqrt(N) times mean moments.
+            simulation_covariances = self.N * np.asarray(
+                np.atleast_2d(np.cov(mean_g_samples, rowvar=False)), dtype=options.dtype
+            )
 
         # structure progress
         return Progress(
