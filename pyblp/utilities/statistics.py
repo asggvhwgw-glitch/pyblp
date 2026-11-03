@@ -1,6 +1,6 @@
 """Standard statistical routines."""
 
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 import scipy.linalg
@@ -41,6 +41,7 @@ class IV(object):
         y_list: List[Array],
         jacobian_list: List[Array],
         convert_jacobians: bool,
+        fixed_parameters: Optional[Array] = None,
     ) -> Tuple[Array, List[Array], List[Array]]:
         """Estimate parameters and compute residuals. Optionally convert Jacobians of y into Jacobians of residuals."""
 
@@ -51,7 +52,15 @@ class IV(object):
 
         # estimate the model
         XZ = X.T @ Z
-        parameters = self.covariances @ XZ @ W @ (Z.T @ y)
+        if fixed_parameters is None:
+            parameters = self.covariances @ XZ @ W @ (Z.T @ y)
+        else:
+            if convert_jacobians:
+                raise ValueError("Fixed coefficients cannot be used for Jacobian conversion.")
+            parameters = np.asarray(fixed_parameters)
+            if parameters.shape != (X.shape[1], y.shape[1]):
+                raise ValueError("Fixed coefficients have an unexpected shape.")
+
         residuals = y - X @ parameters
 
         # split the parameters and residuals into lists
