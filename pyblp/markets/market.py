@@ -520,7 +520,7 @@ class Market(Container):
 
             # add information about the max norm
             nonlocal smallest_max_norm
-            header.extend([("Delta" if fp_type in {'linear', 'safe_linear'} else "Exp Delta", "Max Norm"), ("Max Norm", "Improvement")])
+            header.extend([("Exp Delta" if fp_type in {'nonlinear', 'safe_nonlinear'} else "Delta", "Max Norm"), ("Max Norm", "Improvement")])
             max_norm: float = np.max(np.abs(x - x0))
             values.append(format_number(max_norm))
             improvement = smallest_max_norm - max_norm
@@ -539,8 +539,45 @@ class Market(Container):
             # format and output the table
             output(format_table(header, values, include_border=False, include_header=include_header))
 
-        # solve for delta with a linear fixed point
-        if fp_type in {'linear', 'safe_linear'}:
+        # Outside-share correction is an opt-in ordinary RC logit contraction.
+        # This is not the standard BLP map and is deliberately disabled for
+        # nested logit, scaled epsilon, and signed quadrature.
+        if fp_type == 'outside':
+            weights = self.agents.weights.ravel()
+            if np.any(weights < 0) or not np.any(weights > 0):
+                raise ValueError("fp_type='outside' requires nonnegative, nonzero integration weights.")
+            observed_outside = 1 - float(self.products.shares.sum())
+            if observed_outside <= 0:
+                raise ValueError("fp_type='outside' requires positive observed outside share.")
+            log_observed_outside = np.log(observed_outside)
+            log_observed = np.log(self.products.shares)
+            with np.errstate(divide='ignore'):
+                log_weights = np.log(weights)
+            availability = self.agents.availability.T if self.agents.availability.size else None
+
+            def contraction(x: Array, iterations: int, evaluations: int) -> ContractionResults:
+                """Match inside and outside shares, in mean-utility coordinates."""
+                probabilities = self.compute_probabilities(x, safe=True)[0]
+                shares = probabilities @ self.agents.weights
+                utilities = x + self.mu
+                if availability is not None:
+                    utilities = np.where(availability > 0, utilities, -np.inf)
+                log_p0 = -np.logaddexp(0, scipy.special.logsumexp(utilities, axis=0))
+                log_outside = scipy.special.logsumexp(log_weights + log_p0)
+                x0, x = x, x + log_observed - np.log(shares) + log_outside - log_observed_outside
+                universal_display(x0, x, iterations, evaluations)
+                if not iteration._compute_jacobian:
+                    return x, None, None
+                weighted_probabilities = self.agents.weights * probabilities.T
+                jacobian = (probabilities @ weighted_probabilities) / shares
+                # derivative of log(s0) = -sum_i w_i p0_i p_ki / s0
+                normalized_outside_weights = np.exp(log_weights + log_p0 - log_outside)
+                jacobian -= (probabilities @ normalized_outside_weights[:, None]).T
+                return x, None, jacobian
+
+            delta, stats = iteration._iterate(initial_delta, contraction)
+        # solve for delta with an ordinary linear fixed point
+        elif fp_type in {'linear', 'safe_linear'}:
             log_shares = np.log(self.products.shares)
             compute_probabilities = functools.partial(self.compute_probabilities, safe='safe' in fp_type)
 
