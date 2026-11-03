@@ -66,8 +66,21 @@ def test_outside_share_matches_standard_inversion(outside_share, method):
     np.testing.assert_allclose(outside.compute_shares(), problem.products.shares, rtol=1e-8, atol=1e-12)
 
 
-def test_outside_map_rejects_nesting_and_scaled_epsilon():
-    # Configuration is rejected at the Economy API level, before market iteration.
-    # This intentionally does not try to extend the proof to nested or scaled models.
-    from pyblp.economies.economy import Economy
-    assert 'outside' in Economy._validate_fp_type.__code__.co_consts or True
+@pytest.mark.parametrize('nested,epsilon', [(True, 1.0), (False, 0.5)])
+def test_outside_map_rejects_unsupported_models(nested, epsilon):
+    products = {
+        'market_ids': [0, 0, 0, 1, 1, 1],
+        'prices': [1.0, 1.2, 1.4, 0.8, 1.3, 1.7],
+        'shares': [0.10, 0.11, 0.12, 0.11, 0.12, 0.13],
+        'demand_instruments0': [1, 2, 3, 4, 5, 6],
+    }
+    if nested:
+        products['nesting_ids'] = [0, 1, 0, 0, 1, 0]
+    agents = {'market_ids': [0, 0, 1, 1], 'nodes': [[-0.5], [0.5], [-0.5], [0.5]],
+              'weights': [0.5, 0.5, 0.5, 0.5]}
+    problem = pyblp.Problem(
+        [pyblp.Formulation('1 + prices'), pyblp.Formulation('0 + prices')],
+        products, agent_data=agents, epsilon_scale=epsilon,
+    )
+    with pytest.raises(ValueError, match="outside"):
+        problem._validate_fp_type('outside')
