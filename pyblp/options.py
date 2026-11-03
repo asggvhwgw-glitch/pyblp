@@ -133,6 +133,13 @@ micro_computation_chunks : `int or dict`
     If a dictionary, this should map market IDs to the number of chunks to use. For example, to only chunk computation
     in market ID ``'big market'``, use ``pyblp.options.micro_computation_chunks = {'big_market': 10}``.
 
+implicit_gradient_solver : `str`
+    Experimental solver for the share inversion implicit derivative linear system. The default `'dense'` uses the
+    original PyBLP dense method. Opt-in `'cg'` uses matrix-free conjugate gradients; `'hybrid'` additionally attempts a
+    grouped-graph preconditioner in sufficiently large multi-RHS ordinary RC logit markets. `'auto'` chooses
+    matrix-free for large markets and dense otherwise. Unsupported models and failed residual checks always fall
+    back to the original dense solver. This option does not affect share inversion or the GMM estimator itself.
+
 drop_product_fields : `bool`
     Whether to conserve memory by dropping product data fields that are not needed for market-level computation when
     initializing a market. By default, these fields are not dropped. Setting
@@ -160,3 +167,4 @@ stable_atol = stable_rtol = 1e-8
 detect_micro_collinearity = False
 micro_computation_chunks = 1
 drop_product_fields = False
+implicit_gradient_solver = 'dense'
