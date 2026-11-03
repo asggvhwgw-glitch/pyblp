@@ -200,9 +200,9 @@ For unadjusted weighting matrices,
 
 where :math:`\sigma_\xi^2`, :math:`\sigma_\omega^2`, and :math:`\sigma_{\xi\omega}` are estimates of the variances and covariance between the structural errors.
 
-Simulation error can be accounted for by resampling agents :math:`r = 1, \dots, R` times, evaluating each :math:`\bar{g}_r`, and adding the following to :math:`S`:
+Simulation error can be accounted for by resampling agents :math:`r = 1, \dots, R` times and evaluating each :math:`\bar{g}_r` at the same estimated parameter values, including the concentrated-out linear coefficients. These coefficients must not be re-estimated for each draw. Since :math:`S` is normalized for :math:`\sqrt{N}\bar{g}`, add the following to :math:`S`:
 
-.. math:: \frac{1}{R - 1} \sum_{r=1}^R (\bar{g}_r - \bar{\bar{g}})(\bar{g}_r - \bar{\bar{g}})', \quad \bar{\bar{g}} = \frac{1}{R} \sum_{r=1}^R \bar{g}_r.
+.. math:: \frac{N}{R - 1} \sum_{r=1}^R (\bar{g}_r - \bar{\bar{g}})(\bar{g}_r - \bar{\bar{g}})', \quad \bar{\bar{g}} = \frac{1}{R} \sum_{r=1}^R \bar{g}_r.
    :label: simulation_S
 
 
