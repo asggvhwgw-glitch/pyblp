@@ -1,0 +1,48 @@
+name: PR 201 fixed-parameter benchmark
+on:
+  push:
+    branches: [review/maintainer-200-201-20261112]
+    paths: [.review/benchmark.py, .github/workflows/maintainer-benchmark.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: helper
+      - uses: actions/checkout@v4
+        with:
+          ref: contrib/probability-tangents
+          path: candidate
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare exactly the reviewed implementation
+        working-directory: candidate
+        run: |
+          test "$(git rev-parse HEAD)" = 14f086c247c19b796df3b0ce08c72e11ab27953c
+          python ../helper/.review/revise_prs.py 201 .
+          python -m pip install -e .
+          mkdir -p "$GITHUB_WORKSPACE/benchmark-results"
+          python -m pip freeze > "$GITHUB_WORKSPACE/benchmark-results/environment.txt"
+          lscpu > "$GITHUB_WORKSPACE/benchmark-results/cpu.txt"
+      - name: Compare timings, peak RSS, and actual solve outputs
+        working-directory: candidate
+        run: |
+          set -o pipefail
+          python ../helper/.review/benchmark.py compare "$GITHUB_WORKSPACE/benchmark-results" 2>&1 | tee "$GITHUB_WORKSPACE/benchmark-results/benchmark.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr201-benchmark-${{ github.run_id }}
+          path: benchmark-results
+          retention-days: 14
