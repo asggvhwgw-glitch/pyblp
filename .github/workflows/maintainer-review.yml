@@ -2,27 +2,121 @@ name: Maintainer review 200 and 201
 on:
   push:
     branches: [review/maintainer-200-201-20261112]
+    paths: [.review/revise_prs.py, .github/workflows/maintainer-review.yml]
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
-  inspect:
+  validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pr: 200
+            branch: contrib/share-contraction
+            expected: 86ae4c1986de8aa02da347ecaa113c19a0d9ec54
+            test: test_contraction_jacobian
+          - pr: 201
+            branch: contrib/probability-tangents
+            expected: 14f086c247c19b796df3b0ce08c72e11ab27953c
+            test: test_probability_tangents
+    env:
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-      - name: Archive exact review inputs
-        run: |
-          mkdir -p review-inputs
-          git archive 16536807004b16c24fb40b931531b45b33884e00 > review-inputs/base.tar
-          git archive 86ae4c1986de8aa02da347ecaa113c19a0d9ec54 > review-inputs/pr200.tar
-          git archive 14f086c247c19b796df3b0ce08c72e11ab27953c > review-inputs/pr201.tar
-          grep -n '^def test_' tests/test_blp.py
-          grep -n 'compute_probabilities_by_xi_tensor' pyblp/markets/market.py
-      - uses: actions/upload-artifact@v4
+          path: helper
+      - uses: actions/checkout@v4
         with:
-          name: pyblp-review-inputs
-          path: review-inputs
-          retention-days: 7
+          ref: ${{ matrix.branch }}
+          path: candidate
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply and publish isolated candidate only
+        working-directory: candidate
+        env:
+          EXPECTED: ${{ matrix.expected }}
+          PR_NUMBER: ${{ matrix.pr }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED"
+          mkdir -p "$GITHUB_WORKSPACE/logs"
+          python ../helper/.review/revise_prs.py "$PR_NUMBER" .
+          git diff --check
+          python -m compileall -q pyblp tests
+          git diff --stat
+          git diff > "$GITHUB_WORKSPACE/logs/revision.patch"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pyblp/markets/market.py tests/test_blp.py tests/test_pr_*.py
+          git commit -m "MAINT: address maintainer review of PR $PR_NUMBER"
+          CANDIDATE="review/pr$PR_NUMBER-20261112-$GITHUB_RUN_ID"
+          git push origin "HEAD:refs/heads/$CANDIDATE"
+          printf 'pr=%s\nparent=%s\ncommit=%s\nbranch=%s\n' "$PR_NUMBER" "$EXPECTED" "$(git rev-parse HEAD)" "$CANDIDATE" | tee "$GITHUB_WORKSPACE/logs/candidate.txt"
+      - name: Install test runner
+        run: python -m pip install tox
+      - name: Official style check
+        id: flake8
+        continue-on-error: true
+        working-directory: candidate
+        run: |
+          set -o pipefail
+          tox -e flake8 2>&1 | tee "$GITHUB_WORKSPACE/logs/flake8.log"
+      - name: Official type check
+        id: mypy
+        continue-on-error: true
+        working-directory: candidate
+        run: |
+          set -o pipefail
+          tox -e mypy 2>&1 | tee "$GITHUB_WORKSPACE/logs/mypy.log"
+      - name: New regressions on existing simulated fixtures
+        id: focused
+        continue-on-error: true
+        working-directory: candidate
+        run: |
+          set -o pipefail
+          tox -e tests -- -n 5 tests/test_blp.py -k '${{ matrix.test }}' 2>&1 | tee "$GITHUB_WORKSPACE/logs/focused.log"
+          .tox/tests/bin/python -m pip freeze > "$GITHUB_WORKSPACE/logs/test-environment.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: preflight-pr${{ matrix.pr }}-${{ github.run_id }}
+          path: logs
+          retention-days: 14
+      - name: Complete official test suite
+        id: full
+        if: steps.flake8.outcome == 'success' && steps.mypy.outcome == 'success' && steps.focused.outcome == 'success'
+        continue-on-error: true
+        working-directory: candidate
+        run: |
+          set -o pipefail
+          tox -e tests 2>&1 | tee "$GITHUB_WORKSPACE/logs/full.log"
+      - name: Record outcomes
+        if: always()
+        env:
+          STYLE: ${{ steps.flake8.outcome }}
+          TYPES: ${{ steps.mypy.outcome }}
+          FOCUSED: ${{ steps.focused.outcome }}
+          FULL: ${{ steps.full.outcome }}
+        run: |
+          mkdir -p logs
+          printf 'flake8=%s\nmypy=%s\nfocused=%s\nfull=%s\n' "$STYLE" "$TYPES" "$FOCUSED" "$FULL" | tee logs/outcomes.txt
+          cat logs/candidate.txt logs/outcomes.txt >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: validation-pr${{ matrix.pr }}-${{ github.run_id }}
+          path: logs
+          retention-days: 14
+      - name: Require all validation gates
+        if: always()
+        run: |
+          test '${{ steps.flake8.outcome }}' = success
+          test '${{ steps.mypy.outcome }}' = success
+          test '${{ steps.focused.outcome }}' = success
+          test '${{ steps.full.outcome }}' = success
