@@ -1,0 +1,28 @@
+name: Maintainer review 200 and 201
+on:
+  push:
+    branches: [review/maintainer-200-201-20261112]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Archive exact review inputs
+        run: |
+          mkdir -p review-inputs
+          git archive 16536807004b16c24fb40b931531b45b33884e00 > review-inputs/base.tar
+          git archive 86ae4c1986de8aa02da347ecaa113c19a0d9ec54 > review-inputs/pr200.tar
+          git archive 14f086c247c19b796df3b0ce08c72e11ab27953c > review-inputs/pr201.tar
+          grep -n '^def test_' tests/test_blp.py
+          grep -n 'compute_probabilities_by_xi_tensor' pyblp/markets/market.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pyblp-review-inputs
+          path: review-inputs
+          retention-days: 7
